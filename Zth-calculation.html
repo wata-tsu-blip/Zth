@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>過渡熱抵抗 3Dシミュレーター (パレート探索版)</title>
+    
+    <!-- Tailwind CSS (スタイリング用) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React & ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    
+    <!-- Babel (ブラウザ内でJSXをコンパイルするため) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Prop-types & Recharts (グラフ描画用: バージョンを固定して読み込みエラーを回避) -->
+    <script src="https://unpkg.com/prop-types@15.7.2/prop-types.min.js"></script>
+    <script src="https://unpkg.com/recharts@2.10.3/umd/Recharts.js"></script>
+    
+    <!-- Three.js & OrbitControls (3D描画用) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+    <style>
+        body, html { margin: 0; padding: 0; height: 100vh; overflow: hidden; font-family: sans-serif; }
+        #root { height: 100%; }
+        /* Tailwindのデフォルトスクロールバーを少し見栄え良く */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        // --- ライブラリの読み込み ---
+        const { useState, useEffect, useCallback, useMemo, useRef } = React;
+        const { LineChart, Line, ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ZAxis } = window.Recharts;
+
+        // --- SVGアイコンの定義 (CDN依存を減らすためインライン化) ---
+        const IconBase = ({ children, className }) => (
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>{children}</svg>
+        );
+        const Layers = ({ className }) => <IconBase className={className}><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></IconBase>;
+        const Play = ({ className }) => <IconBase className={className}><polygon points="5 3 19 12 5 21 5 3"/></IconBase>;
+        const Trash2 = ({ className }) => <IconBase className={className}><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></IconBase>;
+        const Target = ({ className }) => <IconBase className={className}><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></IconBase>;
+        const Network = ({ className }) => <IconBase className={className}><rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/></IconBase>;
+        const BoxIcon = ({ className }) => <IconBase className={className}><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></IconBase>;
+        const LayoutTemplate = ({ className }) => <IconBase className={className}><rect x="3" y="3" width="18" height="7" rx="2" ry="2"/><rect x="3" y="14" width="7" height="7" rx="2" ry="2"/><rect x="14" y="14" width="7" height="7" rx="2" ry="2"/></IconBase>;
+        const Maximize = ({ className }) => <IconBase className={className}><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></IconBase>;
+        const Cpu = ({ className }) => <IconBase className={className}><rect x="4" y="4" width="16" height="16" rx="2" ry="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></IconBase>;
+
+        // --- 材料データベース ---
+        const materialDB = {
+          "SiC": { name: "SiC (炭化ケイ素)", lambda: 370, rho: 3210, c: 690 },
+          "Si": { name: "Si (シリコン)", lambda: 149, rho: 2330, c: 710 },
+          "Solder_SnAgCu": { name: "はんだ (Sn-3Ag-0.5Cu)", lambda: 55, rho: 7400, c: 230 },
+          "Solder_PbSn": { name: "はんだ (Pb-Sn)", lambda: 50, rho: 8400, c: 150 },
+          "Cu": { name: "Cu (銅)", lambda: 398, rho: 8960, c: 385 },
+          "Al": { name: "Al (アルミニウム)", lambda: 237, rho: 2700, c: 900 },
+          "AlN": { name: "AlN (窒化アルミニウム)", lambda: 170, rho: 3260, c: 740 },
+          "Si3N4": { name: "Si3N4 (窒化ケイ素)", lambda: 90, rho: 3200, c: 700 },
+          "TIM": { name: "サーマルグリース", lambda: 3.0, rho: 2500, c: 1000 },
+          "Custom": { name: "カスタム材料", lambda: 100, rho: 5000, c: 500 }
+        };
+
+        // --- 3Dビューア コンポーネント ---
+        const ThreeViewer = ({ config, computedLayers, layers }) => {
+          const mountRef = useRef(null);
+
+          useEffect(() => {
+            if (!mountRef.current || !window.THREE) return;
+
+            const THREE = window.THREE;
+            const width = mountRef.current.clientWidth;
+            const height = mountRef.current.clientHeight;
+
+            const scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xf8fafc);
+
+            const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
+            const renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(width, height);
+            
+            mountRef.current.innerHTML = '';
+            mountRef.current.appendChild(renderer.domElement);
+
+            const controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+
+            scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
+            dirLight.position.set(20, 50, 20);
+            scene.add(dirLight);
+
+            const { nx, ny, px, py, w, d } = config;
+
+            const createFrustum = (wTop, dTop, wBot, dBot, h, yPos, color, opacity) => {
+              const geom = new THREE.BoxGeometry(1, 1, 1);
+              const pos = geom.attributes.position;
+              for (let i = 0; i < pos.count; i++) {
+                const vx = pos.getX(i);
+                const vy = pos.getY(i);
+                const vz = pos.getZ(i);
+                const cw = vy > 0 ? wTop : wBot;
+                const cd = vy > 0 ? dTop : dBot;
+                pos.setXYZ(i, Math.sign(vx) * cw/2, vy * h, Math.sign(vz) * cd/2);
+              }
+              geom.computeVertexNormals();
+              const mat = new THREE.MeshPhongMaterial({ 
+                color, transparent: true, opacity, side: THREE.DoubleSide, depthWrite: false 
+              });
+              const mesh = new THREE.Mesh(geom, mat);
+              mesh.position.y = yPos;
+              return mesh;
+            };
+
+            let currentZ = 0;
+            layers.forEach((layer) => {
+              const t = Number(layer.thickness) || 0;
+              if (t <= 0) return;
+
+              let lw = Math.max(config.baseX * 1.5, 60); 
+              let ld = Math.max(config.baseY * 1.5, 60);
+              
+              if (layer.boundary === 'substrate') {
+                lw = config.subX;
+                ld = config.subY;
+              } else if (layer.boundary === 'base') {
+                lw = config.baseX;
+                ld = config.baseY;
+              }
+
+              const layerGeom = new THREE.BoxGeometry(lw, t, ld);
+              const mat = new THREE.MeshPhongMaterial({ 
+                color: layer.color || 0x94a3b8, transparent: true, opacity: 0.2
+              });
+              const mesh = new THREE.Mesh(layerGeom, mat);
+              mesh.position.y = - (currentZ + t / 2);
+              scene.add(mesh);
+              
+              const edges = new THREE.LineSegments(
+                new THREE.EdgesGeometry(layerGeom),
+                new THREE.LineBasicMaterial({ color: layer.color || 0x94a3b8, opacity: 0.6 })
+              );
+              edges.position.y = - (currentZ + t / 2);
+              scene.add(edges);
+
+              currentZ += t;
+            });
+
+            const totalDepth = currentZ;
+
+            const cx = (nx - 1) * px / 2;
+            const cz = (ny - 1) * py / 2;
+            for (let i = 0; i < nx; i++) {
+              for (let j = 0; j < ny; j++) {
+                const xOff = i * px - cx;
+                const zOff = j * py - cz;
+                const chipMesh = new THREE.Mesh(
+                  new THREE.BoxGeometry(w, 0.4, d),
+                  new THREE.MeshPhongMaterial({ color: 0xef4444 })
+                );
+                chipMesh.position.set(xOff, 0.2, zOff);
+                scene.add(chipMesh);
+              }
+            }
+
+            let currentZForSpread = 0;
+            computedLayers.forEach((layer) => {
+              if (layer.isChip) return;
+              const t = Number(layer.thickness) || 0;
+              if (t <= 0) return;
+
+              const frustum = createFrustum(layer.w_in, layer.d_in, layer.w_out, layer.d_out, t, -(currentZForSpread + t/2), 0xf59e0b, 0.3);
+              scene.add(frustum);
+
+              currentZForSpread += t;
+            });
+
+            const maxViewSize = Math.max(config.baseX, config.baseY, 50);
+            camera.position.set(maxViewSize * 0.8, totalDepth * 2 + maxViewSize * 0.5, maxViewSize * 0.8);
+            controls.target.set(0, -totalDepth/2, 0);
+            controls.update();
+
+            let reqId;
+            const animate = () => {
+              reqId = requestAnimationFrame(animate);
+              controls.update();
+              renderer.render(scene, camera);
+            };
+            animate();
+
+            const handleResize = () => {
+              if(!mountRef.current) return;
+              camera.aspect = mountRef.current.clientWidth / mountRef.current.clientHeight;
+              camera.updateProjectionMatrix();
+              renderer.setSize(mountRef.current.clientWidth, mountRef.current.clientHeight);
+            };
+            window.addEventListener('resize', handleResize);
+
+            return () => {
+              cancelAnimationFrame(reqId);
+              window.removeEventListener('resize', handleResize);
+              renderer.dispose();
+            };
+          }, [config, computedLayers, layers]);
+
+          return (
+            <div className="relative w-full h-full bg-slate-50 rounded-xl border border-slate-200 overflow-hidden">
+              <div ref={mountRef} className="w-full h-full" />
+              <div className="absolute bottom-2 left-2 text-xs text-slate-500 bg-white/90 px-2 py-1 rounded shadow-sm pointer-events-none">
+                マウスで回転・ズーム操作
+              </div>
+            </div>
+          );
+        };
+
+
+        // --- メインコンポーネント ---
+        const ZthEstimator = () => {
+          const [config, setConfig] = useState({
+            w: 10, d: 10,
+            nx: 2, ny: 1,
+            px: 12, py: 12,
+            spreadAngle: 45,
+            powerPerChip: 100,
+            subX: 25, subY: 25,
+            baseX: 40, baseY: 40
+          });
+
+          const [layers, setLayers] = useState([
+            { id: 1, name: "Die Attach", color: "#eab308", material: "Solder_SnAgCu", thickness: 0.1, boundary: 'substrate', optEnabled: false, optMin: 0.05, optMax: 0.2 },
+            { id: 2, name: "絶縁基板-Cu箔", color: "#f97316", material: "Cu", thickness: 0.3, boundary: 'substrate', optEnabled: true, optMin: 0.1, optMax: 1.0 },
+            { id: 3, name: "絶縁基板-絶縁層", color: "#2dd4bf", material: "Si3N4", thickness: 0.3, boundary: 'substrate', optEnabled: false, optMin: 0.1, optMax: 1.0 },
+            { id: 4, name: "絶縁基板-Cu箔", color: "#f97316", material: "Cu", thickness: 0.3, boundary: 'substrate', optEnabled: true, optMin: 0.1, optMax: 1.0 },
+            { id: 5, name: "基板下Attach", color: "#eab308", material: "Solder_SnAgCu", thickness: 0.2, boundary: 'substrate', optEnabled: false, optMin: 0.05, optMax: 0.3 },
+            { id: 6, name: "Cu Base", color: "#3b82f6", material: "Cu", thickness: 3.0, boundary: 'base', optEnabled: true, optMin: 0.5, optMax: 8.0 }
+          ]);
+
+          const [chartData, setChartData] = useState([]);
+          const [isCalculating, setIsCalculating] = useState(false);
+          
+          // パレート探索用State
+          const [isOptimizing, setIsOptimizing] = useState(false);
+          const [optProgress, setOptProgress] = useState(0);
+          const [paretoData, setParetoData] = useState([]);
+          const [scatterData, setScatterData] = useState([]);
+          const [activeTab, setActiveTab] = useState('transient'); // 'transient' | 'pareto'
+
+          // 実効面積計算コアロジック
+          const getEffectiveAreaBase = useCallback((z, boundaryType, currentConfig) => {
+            let maxWidth = Infinity;
+            let maxDepth = Infinity;
+            
+            if (boundaryType === 'substrate') {
+              maxWidth = currentConfig.subX;
+              maxDepth = currentConfig.subY;
+            } else if (boundaryType === 'base') {
+              maxWidth = currentConfig.baseX;
+              maxDepth = currentConfig.baseY;
+            }
+
+            const spread = z * Math.tan(currentConfig.spreadAngle * Math.PI / 180);
+            const w_spread = currentConfig.w + 2 * spread;
+            const d_spread = currentConfig.d + 2 * spread;
+
+            const w_no_overlap = currentConfig.nx * w_spread;
+            const w_overlap = w_spread + (currentConfig.nx - 1) * currentConfig.px;
+            const w_eff = Math.min(w_no_overlap, w_overlap, maxWidth);
+
+            const d_no_overlap = currentConfig.ny * d_spread;
+            const d_overlap = d_spread + (currentConfig.ny - 1) * currentConfig.py;
+            const d_eff = Math.min(d_no_overlap, d_overlap, maxDepth);
+
+            return { area: w_eff * d_eff, w_eff, d_eff };
+          }, []);
+
+          const getEffectiveArea = useCallback((z, boundaryType) => {
+            return getEffectiveAreaBase(z, boundaryType, config);
+          }, [config, getEffectiveAreaBase]);
+
+          const computedLayers = useMemo(() => {
+            let currentZ = 0;
+            
+            const chipMat = materialDB["SiC"];
+            const chipVol_m3 = (config.w * config.d * 0.35) * 1e-9 * (config.nx * config.ny);
+            const chipC = chipMat.rho * chipMat.c * chipVol_m3;
+            const chipR = (0.35 * 1e-3) / (chipMat.lambda * config.w * config.d * 1e-6 * config.nx * config.ny);
+
+            const calculated = layers.map(layer => {
+              const t = Number(layer.thickness);
+              const z_in = currentZ;
+              const z_out = currentZ + t;
+              
+              const { area: a_in, w_eff: w_in, d_eff: d_in } = getEffectiveArea(z_in, layer.boundary);
+              const { area: a_out, w_eff: w_out, d_eff: d_out } = getEffectiveArea(z_out, layer.boundary);
+              
+              const a_avg = (a_in + a_out + Math.sqrt(a_in * a_out)) / 3;
+              
+              const mat = materialDB[layer.material] || materialDB["Cu"];
+              const d_m = t * 1e-3;
+              const a_m2 = a_avg * 1e-6;
+              
+              const r = d_m / (mat.lambda * a_m2);
+              const c = mat.rho * mat.c * d_m * a_m2;
+
+              currentZ += t;
+              return { ...layer, r, c, a_in, a_out, w_in, d_in, w_out, d_out, thickness: t };
+            });
+
+            return [{ id: 0, name: "Chip (Source)", r: chipR, c: chipC, isChip: true }, ...calculated];
+          }, [layers, config, getEffectiveArea]);
+
+          const runSimulation = useCallback(() => {
+            setIsCalculating(true);
+            
+            setTimeout(() => {
+              const totalPower = config.powerPerChip * config.nx * config.ny;
+              const t_end = 10; 
+              const dt = 1e-5; 
+              
+              const n = computedLayers.length;
+              let temps = new Array(n).fill(0);
+              const results = [];
+              
+              let currentLog = -6;
+              const logMax = 1;
+              const logSteps = 200;
+              const logStepSize = (logMax - currentLog) / logSteps;
+              let nextLogTarget = Math.pow(10, currentLog);
+
+              for (let t = 0; t <= t_end; t += dt) {
+                if (t >= nextLogTarget || t === 0) {
+                  results.push({
+                    time: t === 0 ? 1e-7 : t,
+                    zth_per_chip: temps[0] / config.powerPerChip,
+                  });
+                  currentLog += logStepSize;
+                  nextLogTarget = Math.pow(10, currentLog);
+                }
+                
+                const nextTemps = [...temps];
+                for (let i = 0; i < n; i++) {
+                  const r_i = Math.max(computedLayers[i].r, 1e-6);
+                  const c_i = Math.max(computedLayers[i].c, 1e-6);
+                  
+                  const heatIn = (i === 0) ? totalPower : (temps[i - 1] - temps[i]) / r_i;
+                  const heatOut = (i === n - 1) ? temps[i] / r_i : (temps[i] - temps[i + 1]) / Math.max(computedLayers[i + 1].r, 1e-6);
+                    
+                  nextTemps[i] += ((heatIn - heatOut) / c_i) * dt;
+                }
+                temps = nextTemps;
+              }
+              
+              setChartData(results);
+              setIsCalculating(false);
+            }, 50);
+          }, [computedLayers, config.powerPerChip, config.nx, config.ny]);
+
+          // --- モンテカルロ＆パレートフロント探索 ---
+          const startParetoSearch = () => {
+            setIsOptimizing(true);
+            setActiveTab('pareto');
+            setOptProgress(0);
+
+            const optTargets = layers.filter(l => l.optEnabled);
+            if (optTargets.length === 0) {
+              alert("最適化対象の層がありません。「探索対象」のチェックを入れてください。");
+              setIsOptimizing(false);
+              return;
+            }
+
+            const SAMPLES = 3000; // 乱数シミュレーション回数
+            const CHUNK_SIZE = 500;
+            let currentSample = 0;
+            const allResults = [];
+
+            const evaluateObjectives = (genes) => {
+              let currentZ = 0;
+              let totalR = 0;
+              let totalThickness = 0;
+              
+              const chipMat = materialDB["SiC"];
+              const chipR = (0.35 * 1e-3) / (chipMat.lambda * config.w * config.d * 1e-6 * config.nx * config.ny);
+              totalR += chipR;
+
+              for (let i = 0; i < layers.length; i++) {
+                const layer = layers[i];
+                const t = layer.optEnabled ? genes[layer.id] : Number(layer.thickness);
+                if (t <= 0) continue;
+
+                totalThickness += t;
+
+                const z_in = currentZ;
+                const z_out = currentZ + t;
+                
+                const { area: a_in } = getEffectiveAreaBase(z_in, layer.boundary, config);
+                const { area: a_out } = getEffectiveAreaBase(z_out, layer.boundary, config);
+                const a_avg = (a_in + a_out + Math.sqrt(a_in * a_out)) / 3;
+                
+                const mat = materialDB[layer.material] || materialDB["Cu"];
+                const r = (t * 1e-3) / (mat.lambda * a_avg * 1e-6);
+                totalR += r;
+                currentZ += t;
+              }
+              return { rth: totalR * (config.nx * config.ny), thickness: totalThickness };
+            };
+
+            const processChunk = () => {
+              const endSample = Math.min(currentSample + CHUNK_SIZE, SAMPLES);
+              
+              for (let i = currentSample; i < endSample; i++) {
+                const genes = {};
+                optTargets.forEach(l => {
+                  const min = Number(l.optMin) || 0.05;
+                  const max = Number(l.optMax) || 5.0;
+                  genes[l.id] = min + Math.random() * (max - min);
+                });
+                
+                const { rth, thickness } = evaluateObjectives(genes);
+                allResults.push({ id: i, rth, thickness, genes });
+              }
+
+              currentSample = endSample;
+              setOptProgress(Math.round((currentSample / SAMPLES) * 100));
+
+              if (currentSample < SAMPLES) {
+                setTimeout(processChunk, 10);
+              } else {
+                const paretoFront = [];
+                allResults.sort((a, b) => a.thickness - b.thickness);
+                
+                let minRthSoFar = Infinity;
+                for (let i = 0; i < allResults.length; i++) {
+                  const p = allResults[i];
+                  if (p.rth < minRthSoFar) {
+                    paretoFront.push(p);
+                    minRthSoFar = p.rth;
+                  }
+                }
+
+                setScatterData(allResults.filter(p => !paretoFront.includes(p)));
+                setParetoData(paretoFront);
+                setIsOptimizing(false);
+              }
+            };
+
+            processChunk();
+          };
+
+          const applyGenes = (genes) => {
+            const newLayers = layers.map(l => {
+              if (genes[l.id] !== undefined) {
+                return { ...l, thickness: Number(genes[l.id].toFixed(3)) };
+              }
+              return l;
+            });
+            setLayers(newLayers);
+            setActiveTab('transient'); 
+            setTimeout(() => runSimulation(), 50); 
+          };
+
+          useEffect(() => { runSimulation(); }, [runSimulation]);
+
+          return (
+            <div className="flex flex-col h-screen bg-slate-100 text-slate-800 font-sans">
+              <header className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between shadow-sm z-10 shrink-0">
+                <div className="flex items-center gap-2 text-indigo-600">
+                  <Layers className="w-6 h-6" />
+                  <h1 className="text-xl font-bold">過渡熱抵抗 3Dシミュレーター <span className="text-sm font-normal text-slate-500">w/ Pareto Explorer</span></h1>
+                </div>
+                
+                <div className="flex gap-3">
+                  <button 
+                    onClick={startParetoSearch} 
+                    disabled={isCalculating || isOptimizing}
+                    className="flex items-center justify-center min-w-[160px] gap-2 bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-lg font-medium transition-colors relative overflow-hidden disabled:opacity-50"
+                  >
+                    {isOptimizing ? (
+                      <>
+                        <div className="absolute left-0 top-0 bottom-0 bg-emerald-700 opacity-30 transition-all duration-200" style={{ width: `${optProgress}%` }} />
+                        <span className="relative z-10 flex items-center gap-2 text-sm">
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          探索中 {optProgress}%
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <Target className="w-4 h-4" />
+                        <span className="text-sm">パレート探索実行</span>
+                      </>
+                    )}
+                  </button>
+                  
+                  <button 
+                    onClick={runSimulation} disabled={isCalculating || isOptimizing}
+                    className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50"
+                  >
+                    {isCalculating ? "計算中..." : <><Play className="w-4 h-4 fill-current" /> 再計算</>}
+                  </button>
+                </div>
+              </header>
+
+              <div className="flex flex-1 overflow-hidden">
+                {/* 左側: 設定パネル */}
+                <div className="w-[440px] bg-white border-r border-slate-200 flex flex-col overflow-y-auto shrink-0 shadow-[4px_0_24px_rgba(0,0,0,0.02)] z-10">
+                  
+                  {/* 1. チップ & 基板サイズ設定 */}
+                  <div className="p-5 border-b border-slate-100">
+                    <h2 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                      <LayoutTemplate className="w-5 h-5 text-indigo-500" />
+                      モジュール外形・熱源設定
+                    </h2>
+                    <div className="space-y-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
+                      <div className="grid grid-cols-2 gap-4 pb-3 border-b border-slate-200">
+                        <div>
+                          <label className="block text-xs font-bold text-slate-600 mb-1">絶縁基板 X [mm]</label>
+                          <input type="number" value={config.subX} onChange={e=>setConfig({...config, subX: Number(e.target.value)})} className="w-full text-sm border-slate-300 rounded focus:ring-indigo-500 py-1" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-slate-600 mb-1">絶縁基板 Y [mm]</label>
+                          <input type="number" value={config.subY} onChange={e=>setConfig({...config, subY: Number(e.target.value)})} className="w-full text-sm border-slate-300 rounded focus:ring-indigo-500 py-1" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-slate-600 mb-1">Cu Base X [mm]</label>
+                          <input type="number" value={config.baseX} onChange={e=>setConfig({...config, baseX: Number(e.target.value)})} className="w-full text-sm border-slate-300 rounded focus:ring-indigo-500 py-1" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-slate-600 mb-1">Cu Base Y [mm]</label>
+                          <input type="number" value={config.baseY} onChange={e=>setConfig({...config, baseY: Number(e.target.value)})} className="w-full text-sm border-slate-300 rounded focus:ring-indigo-500 py-1" />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs text-slate-500 mb-1">チップ X [mm]</label>
+                          <input type="number" value={config.w} onChange={e=>setConfig({...config, w: Number(e.target.value)})} className="w-full text-sm border-slate-300 rounded focus:ring-indigo-500 py-1" />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-500 mb-1">チップ Y [mm]</label>
+                          <input type="number" value={config.d} onChange={e=>setConfig({...config, d: Number(e.target.value)})} className="w-full text-sm border-slate-300 rounded focus:ring-indigo-500 py-1" />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-500 mb-1">配置数 X</label>
+                          <input type="number" min="1" value={config.nx} onChange={e=>setConfig({...config, nx: Number(e.target.value)})} className="w-full text-sm border-slate-300 rounded focus:ring-indigo-500 py-1" />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-500 mb-1">配置数 Y</label>
+                          <input type="number" min="1" value={config.ny} onChange={e=>setConfig({...config, ny: Number(e.target.value)})} className="w-full text-sm border-slate-300 rounded focus:ring-indigo-500 py-1" />
+                        </div>
+                        {config.nx > 1 && (
+                          <div>
+                            <label className="block text-xs text-slate-500 mb-1">Xピッチ [mm]</label>
+                            <input type="number" value={config.px} onChange={e=>setConfig({...config, px: Number(e.target.value)})} className="w-full text-sm border-slate-300 rounded focus:ring-indigo-500 py-1" />
+                          </div>
+                        )}
+                        {config.ny > 1 && (
+                          <div>
+                            <label className="block text-xs text-slate-500 mb-1">Yピッチ [mm]</label>
+                            <input type="number" value={config.py} onChange={e=>setConfig({...config, py: Number(e.target.value)})} className="w-full text-sm border-slate-300 rounded focus:ring-indigo-500 py-1" />
+                          </div>
+                        )}
+                        <div className="col-span-2 flex gap-4 pt-2">
+                          <div className="flex-1">
+                            <label className="block text-xs text-slate-500 mb-1 flex items-center gap-1"><Maximize className="w-3 h-3"/>熱拡散角 [度]</label>
+                            <input type="number" value={config.spreadAngle} onChange={e=>setConfig({...config, spreadAngle: Number(e.target.value)})} className="w-full text-sm border-slate-300 rounded focus:ring-indigo-500 py-1" />
+                          </div>
+                          <div className="flex-1">
+                            <label className="block text-xs text-slate-500 mb-1">発熱 (1チップ) [W]</label>
+                            <input type="number" value={config.powerPerChip} onChange={e=>setConfig({...config, powerPerChip: Number(e.target.value)})} className="w-full text-sm border-slate-300 rounded focus:ring-indigo-500 py-1 font-bold text-red-600" />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 2. 層構成設定 */}
+                  <div className="p-5 flex-1">
+                    <div className="flex justify-between items-center mb-4">
+                      <h2 className="font-bold text-slate-800 flex items-center gap-2">
+                        <BoxIcon className="w-5 h-5 text-indigo-500" />
+                        内部層構成と最適化設定
+                      </h2>
+                      <button onClick={() => setLayers([...layers, { id: Date.now(), name: "New Layer", material: "Cu", thickness: 1.0, color:"#94a3b8", boundary: 'none', optEnabled: false, optMin: 0.1, optMax: 1.0 }])}
+                        className="text-xs bg-indigo-50 text-indigo-600 px-2 py-1 rounded font-medium hover:bg-indigo-100"
+                      >
+                        + 層追加
+                      </button>
+                    </div>
+
+                    <div className="space-y-3">
+                      {computedLayers.map((layer, idx) => (
+                        <div key={layer.id} className={`p-3 rounded-lg border ${layer.isChip ? 'bg-red-50 border-red-200' : 'bg-white border-slate-200 shadow-sm'}`}>
+                          {layer.isChip ? (
+                            <div className="flex justify-between items-center">
+                              <span className="font-bold text-red-700 text-sm">熱源 (SiC Chip)</span>
+                              <span className="text-xs text-red-600 font-mono">Total {config.powerPerChip * config.nx * config.ny}W</span>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="flex justify-between mb-2">
+                                <input type="text" value={layer.name} onChange={(e) => {
+                                  const newLayers = [...layers]; newLayers[idx-1].name = e.target.value; setLayers(newLayers);
+                                }} className="font-bold text-sm bg-transparent border-none p-0 focus:ring-0 text-slate-700" />
+                                <button onClick={() => setLayers(layers.filter((_, i) => i !== idx-1))} className="text-slate-400 hover:text-red-500"><Trash2 className="w-4 h-4"/></button>
+                              </div>
+                              <div className="grid grid-cols-12 gap-2 mb-2">
+                                <div className="col-span-4">
+                                  <label className="text-[10px] text-slate-500 block">材料</label>
+                                  <select value={layer.material} onChange={(e) => {
+                                      const newLayers = [...layers]; newLayers[idx-1].material = e.target.value; setLayers(newLayers);
+                                    }} className="w-full text-xs border-slate-300 rounded py-1">
+                                    {Object.entries(materialDB).map(([k, m]) => <option key={k} value={k}>{m.name}</option>)}
+                                  </select>
+                                </div>
+                                <div className="col-span-4">
+                                  <label className="text-[10px] text-slate-500 block">サイズ制約</label>
+                                  <select value={layer.boundary} onChange={(e) => {
+                                      const newLayers = [...layers]; newLayers[idx-1].boundary = e.target.value; setLayers(newLayers);
+                                    }} className="w-full text-[11px] border-slate-300 rounded py-1 bg-slate-50">
+                                    <option value="none">制限なし</option>
+                                    <option value="substrate">絶縁基板内</option>
+                                    <option value="base">Cu Base内</option>
+                                  </select>
+                                </div>
+                                <div className="col-span-4">
+                                  <label className="text-[10px] text-slate-500 block font-bold text-indigo-600">厚み[mm]</label>
+                                  <input type="number" step="0.01" value={layer.thickness} onChange={(e) => {
+                                    const newLayers = [...layers]; newLayers[idx-1].thickness = Number(e.target.value); setLayers(newLayers);
+                                  }} className="w-full text-xs border-slate-300 rounded py-1 bg-indigo-50 font-medium" />
+                                </div>
+                              </div>
+                              
+                              {/* パレート最適化設定エリア */}
+                              <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between bg-slate-50/50 rounded">
+                                <label className="flex items-center gap-1.5 text-[11px] text-slate-600 font-medium cursor-pointer">
+                                  <input 
+                                    type="checkbox" 
+                                    checked={layer.optEnabled || false}
+                                    onChange={(e) => {
+                                      const newLayers = [...layers]; 
+                                      newLayers[idx-1].optEnabled = e.target.checked; 
+                                      setLayers(newLayers);
+                                    }}
+                                    className="rounded border-slate-300 text-emerald-500 focus:ring-emerald-500 w-3 h-3"
+                                  />
+                                  探索対象
+                                </label>
+                                
+                                {layer.optEnabled && (
+                                  <div className="flex items-center gap-2">
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[10px] text-slate-400">Min:</span>
+                                      <input 
+                                        type="number" step="0.05" 
+                                        value={layer.optMin || 0.1} 
+                                        onChange={(e) => { const newLayers = [...layers]; newLayers[idx-1].optMin = Number(e.target.value); setLayers(newLayers); }}
+                                        className="w-12 text-[10px] border-slate-300 rounded py-0.5 px-1 h-5 text-center"
+                                      />
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[10px] text-slate-400">Max:</span>
+                                      <input 
+                                        type="number" step="0.1" 
+                                        value={layer.optMax || 5.0} 
+                                        onChange={(e) => { const newLayers = [...layers]; newLayers[idx-1].optMax = Number(e.target.value); setLayers(newLayers); }}
+                                        className="w-12 text-[10px] border-slate-300 rounded py-0.5 px-1 h-5 text-center"
+                                      />
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 右側: 3Dビュー ＆ グラフ */}
+                <div className="flex-1 flex flex-col p-4 gap-4 overflow-hidden">
+                  
+                  {/* 上段: 3Dビジュアライザー */}
+                  <div className="h-2/5 min-h-[250px] shadow-sm rounded-xl">
+                     <ThreeViewer config={config} computedLayers={computedLayers} layers={layers} />
+                  </div>
+
+                  {/* 下段: グラフエリア (タブ切り替え) */}
+                  <div className="flex-1 bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-col min-h-[300px]">
+                    <div className="flex items-center justify-between mb-4 border-b border-slate-100 pb-2">
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={() => setActiveTab('transient')}
+                          className={`px-4 py-1.5 text-sm font-bold rounded-t-lg transition-colors flex items-center gap-2 ${activeTab === 'transient' ? 'bg-indigo-50 text-indigo-700 border-b-2 border-indigo-600' : 'text-slate-500 hover:bg-slate-50'}`}
+                        >
+                          <Cpu className="w-4 h-4" /> 過渡熱抵抗 (時間変化)
+                        </button>
+                        <button 
+                          onClick={() => setActiveTab('pareto')}
+                          className={`px-4 py-1.5 text-sm font-bold rounded-t-lg transition-colors flex items-center gap-2 ${activeTab === 'pareto' ? 'bg-emerald-50 text-emerald-700 border-b-2 border-emerald-600' : 'text-slate-500 hover:bg-slate-50'}`}
+                        >
+                          <Network className="w-4 h-4" /> パレートフロント (厚み vs Rth)
+                        </button>
+                      </div>
+                      
+                      {activeTab === 'transient' && (
+                        <div className="text-slate-500 text-xs">
+                          定常Zth: <span className="font-bold text-indigo-600 text-sm ml-1">
+                            {(computedLayers.reduce((s,l)=>s+l.r, 0) * (config.nx * config.ny)).toFixed(3)}
+                          </span> K/W
+                        </div>
+                      )}
+                    </div>
+                    
+                    <div className="flex-1">
+                      {activeTab === 'transient' ? (
+                        // --- 過渡熱抵抗グラフ ---
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={chartData} margin={{ top: 10, right: 20, left: 10, bottom: 20 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                            <XAxis dataKey="time" scale="log" domain={['dataMin', 'dataMax']} type="number"
+                              tickFormatter={(v) => v < 0.001 ? `${(v*1e6).toFixed(0)}µs` : v < 1 ? `${(v*1e3).toFixed(0)}ms` : `${v}s`}
+                              stroke="#94a3b8" fontSize={12} label={{ value: 'Time [s]', position: 'bottom', offset: 0, fontSize: 12 }}
+                            />
+                            <YAxis stroke="#94a3b8" fontSize={12} label={{ value: 'Zth_per_chip [K/W]', angle: -90, position: 'insideLeft', fontSize: 12 }} />
+                            <Tooltip 
+                              contentStyle={{ borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '12px' }}
+                              labelFormatter={(val) => `Time: ${val.toExponential(2)} s`}
+                              formatter={(value) => [value.toFixed(4), 'Zth [K/W]']}
+                            />
+                            <Line type="monotone" dataKey="zth_per_chip" stroke="#4f46e5" strokeWidth={3} dot={false} activeDot={{ r: 5 }} isAnimationActive={false} />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      ) : (
+                        // --- パレートフロント散布図 ---
+                        paretoData.length > 0 ? (
+                          <div className="w-full h-full relative">
+                            <div className="absolute top-0 right-0 z-10 text-xs text-slate-500 bg-white/80 px-2 py-1 rounded border border-slate-100 shadow-sm pointer-events-none">
+                              💡 赤い点をクリックすると、その構成をシミュレーターに反映します
+                            </div>
+                            <ResponsiveContainer width="100%" height="100%">
+                              <ScatterChart margin={{ top: 20, right: 20, left: 10, bottom: 20 }}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                                <XAxis 
+                                  type="number" dataKey="thickness" name="Total Thickness" 
+                                  domain={['dataMin - 0.5', 'dataMax + 0.5']} 
+                                  stroke="#94a3b8" fontSize={12} 
+                                  label={{ value: 'モジュール総厚み [mm]', position: 'bottom', offset: 0, fontSize: 12 }}
+                                />
+                                <YAxis 
+                                  type="number" dataKey="rth" name="Thermal Resistance" 
+                                  domain={['dataMin - 0.05', 'dataMax + 0.05']} 
+                                  stroke="#94a3b8" fontSize={12} 
+                                  label={{ value: '定常Zth [K/W]', angle: -90, position: 'insideLeft', fontSize: 12 }}
+                                />
+                                <ZAxis type="number" range={[40, 40]} />
+                                <Tooltip 
+                                  cursor={{ strokeDasharray: '3 3' }}
+                                  contentStyle={{ borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '12px' }}
+                                  formatter={(value, name) => [value.toFixed(3), name === 'Total Thickness' ? '厚み(mm)' : 'Zth(K/W)']}
+                                />
+                                <Scatter name="探索空間" data={scatterData} fill="#cbd5e1" opacity={0.4} />
+                                <Scatter 
+                                  name="パレートフロント" 
+                                  data={paretoData} 
+                                  fill="#ef4444" 
+                                  line={{ stroke: '#ef4444', strokeWidth: 2 }} 
+                                  shape="circle"
+                                  onClick={(data) => applyGenes(data.payload.genes)}
+                                  className="cursor-pointer hover:opacity-80"
+                                />
+                              </ScatterChart>
+                            </ResponsiveContainer>
+                          </div>
+                        ) : (
+                          <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 gap-3">
+                            <Target className="w-12 h-12 text-slate-200" />
+                            <p>右上の「パレート探索実行」ボタンを押すと、厚みと熱抵抗のトレードオフ図を生成します。</p>
+                          </div>
+                        )
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        };
+
+        // --- アプリの起動 ---
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<ZthEstimator />);
+    </script>
+</body>
+</html>
