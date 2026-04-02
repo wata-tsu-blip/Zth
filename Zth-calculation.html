@@ -52,17 +52,18 @@ const Cpu = ({ className }) => <IconBase className={className}><rect x="4" y="4"
 const Download = ({ className }) => <IconBase className={className}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></IconBase>;
 
 // --- 材料データベース ---
+// lambda: 熱伝導率[W/mK]、rho:密度[g/mm3]、c:比熱[J/kg・K]
 const materialDB = {
-  "SiC": { name: "SiC", lambda: 370, rho: 3210, c: 690 },
+  "SiC": { name: "SiC", lambda: 270, rho: 3210, c: 680 },
   "Si": { name: "Si", lambda: 149, rho: 2330, c: 710 },
-  "Solder_SnAgCu": { name: "Solder(SAC305)", lambda: 55, rho: 7400, c: 230 },
-  "Solder_PbSn": { name: "Solder(PbSn)", lambda: 50, rho: 8400, c: 150 },
+  "Solder_PF358": { name: "Solder(PF358)", lambda: 55.6, rho: 7300, c: 258 },
+  "Solder_Sn5Sb": { name: "Solder(PbSn)", lambda: 48.1, rho: 8400, c: 150 },
   "Cu": { name: "Cu", lambda: 398, rho: 8960, c: 385 },
-  "Al": { name: "Al", lambda: 237, rho: 2700, c: 900 },
+  "Al(A3003)": { name: "Al", lambda: 193, rho: 2700, c: 904 },
   "AlN": { name: "AlN", lambda: 170, rho: 3260, c: 740 },
-  "Si3N4": { name: "Si3N4", lambda: 90, rho: 3200, c: 700 },
+  "Si3N4": { name: "Si3N4", lambda: 80, rho: 3300, c: 680 },
   "TIM": { name: "Grease", lambda: 3.0, rho: 2500, c: 1000 },
-  "Custom": { name: "Custom", lambda: 100, rho: 5000, c: 500 }
+  "Resin": { name: "Resin-insulation", lambda: 17, rho: 1883, c: 880 }
 };
 
 // --- 3Dビューア ---
